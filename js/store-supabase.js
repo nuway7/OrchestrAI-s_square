@@ -20,13 +20,13 @@ export function createSupabaseStore(supabase, me) {
     async list(kind) {
       if (kind === 'works') {
         const { data, error } = await from('works')
-          .select('id, title, description, link, image_path, created_at, author_id, profiles(name)')
+          .select('id, title, description, link, image_path, created_at, author_id, profiles!author_id(name)')
           .order('created_at', { ascending: false }).limit(LIMIT);
         check(error);
         return data.map((r) => ({ id: r.id, title: r.title, desc: r.description, link: r.link, imagePath: r.image_path, author: nameOf(r), authorId: r.author_id, date: r.created_at }));
       }
       const { data, error } = await from('opinions')
-        .select('id, body, created_at, author_id, profiles(name), opinion_likes(user_id)')
+        .select('id, body, created_at, author_id, profiles!author_id(name), opinion_likes(user_id)')
         .order('created_at', { ascending: false }).limit(LIMIT);
       check(error);
       return data.map((r) => ({ id: r.id, text: r.body, author: nameOf(r), authorId: r.author_id, date: r.created_at, likes: (r.opinion_likes || []).map((l) => l.user_id) }));
@@ -70,7 +70,7 @@ export function createSupabaseStore(supabase, me) {
 
     async agendas() {
       const { data, error } = await from('agendas')
-        .select('id, title, body, created_at, author_id, profiles(name), agenda_comments(count)')
+        .select('id, title, body, created_at, author_id, profiles!author_id(name), agenda_comments(count)')
         .order('created_at', { ascending: false }).limit(LIMIT);
       check(error);
       return data.map((r) => ({ id: r.id, title: r.title, body: r.body, author: nameOf(r), authorId: r.author_id, date: r.created_at, commentCount: r.agenda_comments?.[0]?.count ?? 0 }));
@@ -78,7 +78,7 @@ export function createSupabaseStore(supabase, me) {
     async addAgenda({ title, body }) { check((await from('agendas').insert({ title, body })).error); },
     async comments(agendaId) {
       const { data, error } = await from('agenda_comments')
-        .select('id, body, created_at, author_id, profiles(name)')
+        .select('id, body, created_at, author_id, profiles!author_id(name)')
         .eq('agenda_id', agendaId).order('created_at', { ascending: true }).limit(LIMIT);
       check(error);
       return data.map((r) => ({ id: r.id, text: r.body, author: nameOf(r), authorId: r.author_id, date: r.created_at }));
@@ -88,7 +88,7 @@ export function createSupabaseStore(supabase, me) {
     async events() {
       const since = new Date(Date.now() - 7 * 864e5).toISOString(); // 지난 일주일 것까지
       const { data, error } = await from('events')
-        .select('id, title, starts_at, place, author_id, profiles(name), event_rsvps(user_id, status)')
+        .select('id, title, starts_at, place, author_id, profiles!author_id(name), event_rsvps(user_id, status)')
         .gte('starts_at', since).order('starts_at', { ascending: true }).limit(LIMIT);
       check(error);
       return data.map((r) => ({ id: r.id, title: r.title, startsAt: r.starts_at, place: r.place, author: nameOf(r), authorId: r.author_id, rsvps: (r.event_rsvps || []).map((x) => ({ userId: x.user_id, status: x.status })) }));
