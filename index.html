@@ -21,6 +21,8 @@
   <div id="log" hidden aria-live="polite"></div>
   <button id="prompt" type="button" hidden></button>
   <form id="chat" hidden>
+    <button id="emote-toggle" class="emote-toggle" type="button" aria-label="감정 표현">😊</button>
+    <div id="emote-bar" class="emote-bar" hidden></div>
     <input id="chat-input" maxlength="120" placeholder="Enter 눌러 말하기" autocomplete="off" aria-label="채팅">
     <button type="submit">보내기</button>
   </form>
@@ -60,6 +62,10 @@
             <input id="name" maxlength="12" placeholder="광장에서 보일 이름" autocomplete="off" required>
           </label>
           <div id="pickers"></div>
+          <div class="field">
+            <span>내 작업실 <small>(광장 아래쪽 5개 방 중 하나, 안 골라도 돼요)</small></span>
+            <div id="room-picker" class="rooms"></div>
+          </div>
           <button id="shuffle" type="button" class="ghost">🎲 랜덤으로 꾸미기</button>
         </div>
       </div>

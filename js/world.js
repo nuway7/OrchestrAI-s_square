@@ -5,7 +5,8 @@ export const ROWS = 32;
 export const WORLD_W = COLS * TILE;
 export const WORLD_H = ROWS * TILE;
 
-const GRASS = 0, PATH = 1, WATER = 2, RIM = 3;
+const GRASS = 0, PATH = 1, RIM = 3, FLOOR = 4, WALL = 5;
+export const ROOM_COUNT = 5;
 const OUT = '#4a342c';
 
 function rng(seed) {
@@ -139,15 +140,60 @@ function signSprite() {
   });
 }
 
-function fountainSprite(frame) {
-  return makeSprite(20, 30, (p) => {
-    p(6, 18, 8, 12, OUT); p(7, 18, 6, 11, '#d6cfc3'); p(7, 18, 2, 11, '#e8e2d8');
-    p(2, 14, 16, 5, OUT); p(3, 15, 14, 3, '#cfc7ba');
-    const jet = frame ? '#d8f2fb' : '#bfe8f7';
-    p(9, 2, 2, 12, jet);
-    p(6, 1 + frame, 8, 2, jet);
-    p(4, 4 + frame, 2, 6, jet); p(14, 4 + frame, 2, 6, jet);
-    p(3, 10, 2, 3, '#8fd3ec'); p(15, 10, 2, 3, '#8fd3ec');
+// 광장 가운데 D-day 전광판. 숫자는 main.js가 PANEL 자리에 매 순간 그린다.
+export const MONUMENT_PANEL = { x: 5, y: 5, w: 54, h: 30 };
+function monumentSprite() {
+  return makeSprite(64, 54, (p) => {
+    // 받침
+    p(10, 38, 44, 16, OUT); p(11, 39, 42, 14, '#d6cfc3'); p(11, 39, 42, 3, '#e8e2d8'); p(11, 50, 42, 3, '#bdb4a6');
+    p(26, 34, 12, 6, OUT); p(27, 34, 10, 5, '#b3aa9b');
+    // 전광판 틀
+    p(0, 0, 64, 40, OUT);
+    p(2, 2, 60, 36, '#8a6a55');
+    p(3, 3, 58, 2, '#a7836b');
+    p(MONUMENT_PANEL.x, MONUMENT_PANEL.y, MONUMENT_PANEL.w, MONUMENT_PANEL.h, '#2b2733');
+    // 꺼진 전구 점무늬
+    for (let y = MONUMENT_PANEL.y + 1; y < MONUMENT_PANEL.y + MONUMENT_PANEL.h; y += 2) {
+      for (let x = MONUMENT_PANEL.x + 1; x < MONUMENT_PANEL.x + MONUMENT_PANEL.w; x += 2) p(x, y, 1, 1, '#36313f');
+    }
+    // 모서리 장식 전구
+    for (const [x, y] of [[1, 1], [61, 1], [1, 37], [61, 37]]) p(x, y, 2, 2, '#f7e7a0');
+  });
+}
+
+function deskSprite(tint) {
+  return makeSprite(44, 26, (p) => {
+    // 책상
+    p(0, 10, 44, 12, OUT); p(1, 11, 42, 6, '#c98b4f'); p(1, 17, 42, 4, '#a8703e');
+    p(3, 21, 3, 5, OUT); p(38, 21, 3, 5, OUT);
+    // 노트북 (화면은 방마다 색)
+    p(11, 0, 22, 14, OUT); p(12, 1, 20, 11, '#3b3b46'); p(13, 2, 18, 9, tint);
+    p(15, 4, 10, 1, '#ffffff'); p(15, 6, 13, 1, '#ffffffaa'); p(15, 8, 8, 1, '#ffffffaa');
+    p(8, 13, 28, 3, OUT); p(9, 13, 26, 2, '#d6d6de');
+    // 머그컵
+    p(36, 6, 5, 6, OUT); p(37, 7, 3, 4, '#f4f1ea'); p(41, 8, 2, 2, OUT);
+  });
+}
+
+function plantSprite() {
+  return makeSprite(12, 18, (p) => {
+    p(2, 11, 8, 7, OUT); p(3, 12, 6, 5, '#c27357');
+    p(1, 2, 10, 10, '#3f6b3a'); p(2, 3, 8, 8, '#5fae57'); p(5, 0, 3, 4, '#5fae57'); p(3, 4, 2, 2, '#80c870');
+  });
+}
+
+function scheduleSprite() {
+  return makeSprite(64, 46, (p) => {
+    p(6, 24, 6, 22, OUT); p(7, 24, 4, 21, '#8a5a3c');
+    p(52, 24, 6, 22, OUT); p(53, 24, 4, 21, '#8a5a3c');
+    p(0, 0, 64, 32, OUT);
+    p(2, 2, 60, 28, '#5a7a9a');
+    p(4, 4, 56, 24, '#f4f1ea');
+    p(4, 4, 56, 5, '#d46a6a');
+    for (let r = 0; r < 3; r++) for (let c = 0; c < 7; c++) {
+      const x = 6 + c * 8, y = 11 + r * 6;
+      p(x, y, 6, 4, (r * 7 + c) % 5 === 2 ? '#f2a35e' : '#ddd5c7');
+    }
   });
 }
 
@@ -171,7 +217,6 @@ export function buildWorld() {
       const d = Math.hypot(c + 0.5 - CX, r + 0.5 - CY);
       if (d < 7) ground[at(c, r)] = PATH;
       if (d < 3.2) { ground[at(c, r)] = RIM; solid[at(c, r)] = 1; }
-      if (d < 2.3) ground[at(c, r)] = WATER;
     }
   }
 
@@ -186,6 +231,25 @@ export function buildWorld() {
   fill(ground, 35, 7, 36, 14, PATH);
   fill(solid, 34, 5, 37, 6, 1);
   fill(reserved, 31, 3, 40, 9, 1);
+  // 작업실 동: 방 5개. 방마다 안쪽 3칸 x 4칸, 사이 벽 1칸. 위 벽 23줄, 안쪽 24~27줄, 아래 벽 28줄(가운데 문), 복도 29~30줄
+  const ROOM_TOP = 23, ROOM_BOTTOM = 28;
+  fill(reserved, 1, 21, 22, 30, 1);
+  fill(ground, 2, ROOM_TOP, 22, ROOM_BOTTOM, WALL);
+  fill(solid, 2, ROOM_TOP, 22, ROOM_BOTTOM, 1);
+  fill(ground, 2, 29, 22, 30, PATH);
+  const rooms = [];
+  for (let i = 0; i < ROOM_COUNT; i++) {
+    const c0 = 3 + i * 4;
+    fill(ground, c0, ROOM_TOP + 1, c0 + 2, ROOM_BOTTOM - 1, FLOOR);
+    fill(solid, c0, ROOM_TOP + 2, c0 + 2, ROOM_BOTTOM - 1, 0); // 첫 줄은 책상이라 막아 둔다
+    ground[at(c0 + 1, ROOM_BOTTOM)] = FLOOR;
+    solid[at(c0 + 1, ROOM_BOTTOM)] = 0;
+    rooms.push({ no: i + 1, c0, x: c0 * TILE, y: (ROOM_TOP + 1) * TILE, w: 3 * TILE, h: 4 * TILE });
+  }
+  // 일정 게시판
+  fill(ground, 25, 24, 34, 25, PATH);
+  fill(solid, 30, 22, 33, 23, 1);
+  fill(reserved, 25, 20, 36, 26, 1);
   // 테두리는 못 나가게
   fill(solid, 0, 0, COLS - 1, 0, 1);
   fill(solid, 0, ROWS - 1, COLS - 1, ROWS - 1, 1);
@@ -199,6 +263,14 @@ export function buildWorld() {
   props.push({ img: galleryImg, x: 4 * TILE, y: 9 * TILE - galleryImg.height, baseY: 9 * TILE });
   const boardImg = boardSprite();
   props.push({ img: boardImg, x: 34 * TILE, y: 7 * TILE - boardImg.height, baseY: 7 * TILE });
+  const schedImg = scheduleSprite();
+  props.push({ img: schedImg, x: 30 * TILE, y: 24 * TILE - schedImg.height, baseY: 24 * TILE });
+
+  const SCREEN_TINTS = ['#4fb4d8', '#f28ca8', '#58b98a', '#e8b83e', '#9c86e8'];
+  for (const room of rooms) {
+    addProp(deskSprite(SCREEN_TINTS[room.no - 1]), room.x + 24, room.y + TILE + 2);
+    addProp(plantSprite(), room.x + 40, room.y + 4 * TILE - 1);
+  }
 
   // 벤치와 가로등
   for (const [c, r] of [[19, 11], [27, 11], [19, 20], [27, 20]]) {
@@ -246,7 +318,9 @@ export function buildWorld() {
   const C = {
     grass: hex('#93cf6f'), grassD: hex('#82c062'), grassL: hex('#a7dc85'),
     path: hex('#ead8b2'), pathD: hex('#dfca9c'), pathL: hex('#f3e6c8'), pathEdge: hex('#cdb487'),
-    rim: hex('#d6cfc3'), rimD: hex('#b3aa9b'), water: hex('#69bfe0'), waterL: hex('#8fd3ec'),
+    rim: hex('#d6cfc3'), rimD: hex('#b3aa9b'),
+    floor: hex('#e3c08f'), floorD: hex('#cfa874'), floorL: hex('#ecd0a6'),
+    wall: hex('#efe2cf'), wallTop: hex('#d8c3a5'), wallEdge: hex('#8a6a55'),
   };
   const typeAt = (c, r) => (inb(c, r) ? ground[at(c, r)] : GRASS);
   for (let y = 0; y < WORLD_H; y++) {
@@ -264,7 +338,16 @@ export function buildWorld() {
       } else if (t === RIM) {
         const off = (Math.floor(y / 6) % 2) * 5;
         col = (y % 6 === 0 || (x + off) % 10 === 0) ? C.rimD : C.rim;
-      } else col = n < 0.05 ? C.waterL : C.water;
+      } else if (t === FLOOR) {
+        const joint = (Math.floor(y / 4) * 7) % 16;
+        col = py % 4 === 0 ? C.floorD : px === joint ? C.floorD : n < 0.06 ? C.floorL : C.floor;
+      } else {
+        // 벽: 위에서 내려다본 벽 윗면. 벽이 아닌 쪽 가장자리는 진한 선
+        const edge = (px === 0 && typeAt(c - 1, r) !== WALL) || (px === 15 && typeAt(c + 1, r) !== WALL)
+          || (py === 0 && typeAt(c, r - 1) !== WALL) || (py === 15 && typeAt(c, r + 1) !== WALL);
+        const front = py >= 11 && typeAt(c, r + 1) !== WALL;
+        col = edge ? C.wallEdge : front ? C.wall : C.wallTop;
+      }
       const i = (y * WORLD_W + x) * 4;
       img.data[i] = col[0]; img.data[i + 1] = col[1]; img.data[i + 2] = col[2]; img.data[i + 3] = 255;
     }
@@ -298,19 +381,35 @@ export function buildWorld() {
     }
   }
 
-  const fountain = [fountainSprite(0), fountainSprite(1)];
-  const fountainProp = { img: fountain[0], frames: fountain, x: CX * TILE - 10, y: CY * TILE + 6 - 30, baseY: CY * TILE + 6 };
-  props.push(fountainProp);
+  // 방마다 러그
+  const RUGS = ['#cfe3ef', '#f6d6de', '#d6ecd9', '#f4e5bf', '#e3dcf3'];
+  for (const room of rooms) {
+    gctx.fillStyle = '#8a6a55';
+    gctx.fillRect(room.x + 6, room.y + 22, 36, 30);
+    gctx.fillStyle = RUGS[room.no - 1];
+    gctx.fillRect(room.x + 7, room.y + 23, 34, 28);
+    gctx.fillStyle = 'rgba(255,255,255,0.45)';
+    gctx.fillRect(room.x + 10, room.y + 26, 28, 1);
+    gctx.fillRect(room.x + 10, room.y + 47, 28, 1);
+  }
+
+  const monumentImg = monumentSprite();
+  const monument = { img: monumentImg, x: CX * TILE - 32, y: CY * TILE + 22 - monumentImg.height, baseY: CY * TILE + 22 };
+  props.push(monument);
+  const ddayPanel = { x: monument.x + MONUMENT_PANEL.x, y: monument.y + MONUMENT_PANEL.y, w: MONUMENT_PANEL.w, h: MONUMENT_PANEL.h };
 
   const zones = [
     { id: 'gallery', label: '전시관 들어가기', x: 7 * TILE, y: 9 * TILE, w: 4 * TILE, h: 2 * TILE },
     { id: 'board', label: '의견 게시판 보기', x: 33 * TILE, y: 7 * TILE, w: 6 * TILE, h: 2 * TILE },
-    { id: 'sign', label: '안내 읽기', x: 25 * TILE, y: 21 * TILE, w: 3 * TILE, h: 3 * TILE },
+    { id: 'schedule', label: '일정 게시판 보기', x: 29 * TILE, y: 24 * TILE, w: 6 * TILE, h: 2 * TILE },
+    { id: 'sign', label: '안내 읽기', x: 25 * TILE, y: 21 * TILE, w: 3 * TILE, h: 2 * TILE },
+    { id: 'dday', label: 'D-day 보기', x: CX * TILE - 40, y: CY * TILE + 50, w: 80, h: 36 },
+    ...rooms.map((room) => ({ id: 'laptop', arg: room.no, label: `${room.no}번 방 노트북 열기`, x: room.x, y: room.y + TILE, w: room.w, h: 2 * TILE + 4 })),
   ];
   const labels = [
     { text: '전시관', x: 4 * TILE + 80, y: 9 * TILE - 56 },
     { text: '의견 게시판', x: 34 * TILE + 32, y: 7 * TILE - 50 },
-    { text: '분수 광장', x: CX * TILE, y: (CY - 4) * TILE + 4 },
+    { text: '일정 게시판', x: 30 * TILE + 32, y: 24 * TILE - 50 },
   ];
 
   const isSolid = (x, y) => {
@@ -319,5 +418,5 @@ export function buildWorld() {
     return solid[at(c, r)] === 1;
   };
 
-  return { groundCanvas, props, fountainProp, zones, labels, isSolid, spawn: { x: CX * TILE, y: 22 * TILE } };
+  return { groundCanvas, props, zones, labels, rooms, ddayPanel, isSolid, spawn: { x: CX * TILE, y: 22 * TILE } };
 }

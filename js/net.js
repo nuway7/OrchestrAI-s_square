@@ -20,7 +20,7 @@ const clean = (m) => {
 export function createLocalNet(me, on) {
   const base = { heartbeatMs: 2000, peerTimeout: 7000, posted() {} };
   if (!('BroadcastChannel' in window)) {
-    return { ...base, online: false, hello() {}, move() {}, chat() {}, close() {} };
+    return { ...base, online: false, hello() {}, move() {}, chat() {}, emote() {}, close() {} };
   }
   const ch = new BroadcastChannel(CHANNEL);
   let last = {};
@@ -45,6 +45,11 @@ export function createLocalNet(me, on) {
       case 'chat':
         on.chat({ id: m.id, name: p.name, text: String(m.text || '').slice(0, MAX_CHAT) });
         break;
+      case 'emote': {
+        const n = Number(m.emote);
+        if (Number.isInteger(n) && n >= 1 && n <= 9) on.emote?.({ id: m.id, emote: n });
+        break;
+      }
       case 'bye':
         on.leave(m.id);
         break;
@@ -60,6 +65,7 @@ export function createLocalNet(me, on) {
     hello(state) { last = state; post('hello', state); },
     move(state) { last = state; post('state', state); },
     chat(text) { post('chat', { text: String(text).slice(0, MAX_CHAT) }); },
+    emote(n) { post('emote', { emote: n }); },
     close() { bye(); window.removeEventListener('pagehide', bye); ch.close(); },
   };
 }

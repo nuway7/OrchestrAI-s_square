@@ -56,9 +56,12 @@ grant execute on function public.is_admin() to authenticated;
 -- ---------- 권한 (표 단위) ----------
 revoke all on public.profiles, public.works, public.opinions, public.opinion_likes from anon, authenticated;
 
+-- 작업실 방 번호 (1~5, 한 방에 한 명). 예전 버전 DB에도 열만 더한다.
+alter table public.profiles add column if not exists room smallint unique check (room between 1 and 5);
+
 grant select on public.profiles to authenticated;
-grant insert (id, name, look) on public.profiles to authenticated;
-grant update (name, look, updated_at) on public.profiles to authenticated;
+grant insert (id, name, look, room) on public.profiles to authenticated;
+grant update (name, look, room, updated_at) on public.profiles to authenticated;
 
 grant select, delete on public.works to authenticated;
 grant insert (title, description, link) on public.works to authenticated;
@@ -115,3 +118,137 @@ create policy "plaza: 동아리원만 듣기" on realtime.messages for select to
   using ((select realtime.topic()) = 'plaza');
 create policy "plaza: 동아리원만 보내기" on realtime.messages for insert to authenticated
   with check ((select realtime.topic()) = 'plaza');
+
+-- =====================================================================
+-- 2차: 작업실 노트북(안건), 방문 잔디, 일정, 광장 설정(D-day, 두레 링크)
+-- =====================================================================
+
+-- ---------- 안건과 의견 (작업실 노트북) ----------
+create table if not exists public.agendas (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  title text not null check (char_length(title) between 1 and 60),
+  body text not null default '' check (char_length(body) <= 500),
+  created_at timestamptz not null default now()
+);
+create table if not exists public.agenda_comments (
+  id uuid primary key default gen_random_uuid(),
+  agenda_id uuid not null references public.agendas (id) on delete cascade,
+  author_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  body text not null check (char_length(body) between 1 and 300),
+  created_at timestamptz not null default now()
+);
+create index if not exists agenda_comments_agenda_idx on public.agenda_comments (agenda_id, created_at);
+
+-- ---------- 방문 잔디 (하루 10분 이상 머문 날) ----------
+create table if not exists public.visits (
+  user_id uuid not null references public.profiles (id) on delete cascade,
+  day date not null,
+  primary key (user_id, day)
+);
+-- 날짜는 서버가 한국 시간으로 정한다(직접 넣기 권한은 주지 않고 이 함수로만)
+create or replace function public.mark_visit()
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  insert into public.visits (user_id, day)
+  values (auth.uid(), (now() at time zone 'Asia/Seoul')::date)
+  on conflict do nothing;
+$$;
+revoke all on function public.mark_visit() from public, anon;
+grant execute on function public.mark_visit() to authenticated;
+
+-- ---------- 일정과 참석 ----------
+create table if not exists public.events (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  title text not null check (char_length(title) between 1 and 60),
+  starts_at timestamptz not null,
+  place text not null default '' check (char_length(place) <= 60),
+  created_at timestamptz not null default now()
+);
+create table if not exists public.event_rsvps (
+  event_id uuid not null references public.events (id) on delete cascade,
+  user_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  status text not null check (status in ('going', 'maybe', 'no')),
+  primary key (event_id, user_id)
+);
+
+-- ---------- 광장 설정 (관리자만 바꿈) ----------
+create table if not exists public.club_settings (
+  key text primary key check (key in ('dday', 'links')),
+  value jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+insert into public.club_settings (key, value) values
+  ('dday', '{"title": "두레 런칭", "date": "2026-12-31T00:00:00+09:00"}'),
+  ('links', '{"site": "", "github": ""}')
+on conflict (key) do nothing;
+
+-- ---------- 권한 ----------
+revoke all on public.agendas, public.agenda_comments, public.visits, public.events, public.event_rsvps, public.club_settings from anon, authenticated;
+
+grant select, delete on public.agendas to authenticated;
+grant insert (title, body) on public.agendas to authenticated;
+grant select, delete on public.agenda_comments to authenticated;
+grant insert (agenda_id, body) on public.agenda_comments to authenticated;
+grant select on public.visits to authenticated;
+grant select, delete on public.events to authenticated;
+grant insert (title, starts_at, place) on public.events to authenticated;
+grant select, delete on public.event_rsvps to authenticated;
+grant insert (event_id, status) on public.event_rsvps to authenticated;
+grant update (status) on public.event_rsvps to authenticated;
+grant select on public.club_settings to authenticated;
+grant update (value, updated_at) on public.club_settings to authenticated;
+
+alter table public.agendas enable row level security;
+alter table public.agenda_comments enable row level security;
+alter table public.visits enable row level security;
+alter table public.events enable row level security;
+alter table public.event_rsvps enable row level security;
+alter table public.club_settings enable row level security;
+
+drop policy if exists "agendas: 동아리원은 모두 볼 수 있음" on public.agendas;
+drop policy if exists "agendas: 내 이름으로만 올리기" on public.agendas;
+drop policy if exists "agendas: 내 글 또는 관리자만 지우기" on public.agendas;
+create policy "agendas: 동아리원은 모두 볼 수 있음" on public.agendas for select to authenticated using (true);
+create policy "agendas: 내 이름으로만 올리기" on public.agendas for insert to authenticated with check (author_id = (select auth.uid()));
+create policy "agendas: 내 글 또는 관리자만 지우기" on public.agendas for delete to authenticated
+  using (author_id = (select auth.uid()) or (select public.is_admin()));
+
+drop policy if exists "agenda_comments: 동아리원은 모두 볼 수 있음" on public.agenda_comments;
+drop policy if exists "agenda_comments: 내 이름으로만 올리기" on public.agenda_comments;
+drop policy if exists "agenda_comments: 내 글 또는 관리자만 지우기" on public.agenda_comments;
+create policy "agenda_comments: 동아리원은 모두 볼 수 있음" on public.agenda_comments for select to authenticated using (true);
+create policy "agenda_comments: 내 이름으로만 올리기" on public.agenda_comments for insert to authenticated with check (author_id = (select auth.uid()));
+create policy "agenda_comments: 내 글 또는 관리자만 지우기" on public.agenda_comments for delete to authenticated
+  using (author_id = (select auth.uid()) or (select public.is_admin()));
+
+drop policy if exists "visits: 동아리원은 모두 볼 수 있음" on public.visits;
+create policy "visits: 동아리원은 모두 볼 수 있음" on public.visits for select to authenticated using (true);
+
+drop policy if exists "events: 동아리원은 모두 볼 수 있음" on public.events;
+drop policy if exists "events: 내 이름으로만 올리기" on public.events;
+drop policy if exists "events: 내 글 또는 관리자만 지우기" on public.events;
+create policy "events: 동아리원은 모두 볼 수 있음" on public.events for select to authenticated using (true);
+create policy "events: 내 이름으로만 올리기" on public.events for insert to authenticated with check (author_id = (select auth.uid()));
+create policy "events: 내 글 또는 관리자만 지우기" on public.events for delete to authenticated
+  using (author_id = (select auth.uid()) or (select public.is_admin()));
+
+drop policy if exists "rsvps: 동아리원은 모두 볼 수 있음" on public.event_rsvps;
+drop policy if exists "rsvps: 내 참석만 정하기" on public.event_rsvps;
+drop policy if exists "rsvps: 내 참석만 바꾸기" on public.event_rsvps;
+drop policy if exists "rsvps: 내 참석만 취소" on public.event_rsvps;
+create policy "rsvps: 동아리원은 모두 볼 수 있음" on public.event_rsvps for select to authenticated using (true);
+create policy "rsvps: 내 참석만 정하기" on public.event_rsvps for insert to authenticated with check (user_id = (select auth.uid()));
+create policy "rsvps: 내 참석만 바꾸기" on public.event_rsvps for update to authenticated
+  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+create policy "rsvps: 내 참석만 취소" on public.event_rsvps for delete to authenticated using (user_id = (select auth.uid()));
+
+drop policy if exists "settings: 동아리원은 모두 볼 수 있음" on public.club_settings;
+drop policy if exists "settings: 관리자만 바꾸기" on public.club_settings;
+create policy "settings: 동아리원은 모두 볼 수 있음" on public.club_settings for select to authenticated using (true);
+create policy "settings: 관리자만 바꾸기" on public.club_settings for update to authenticated
+  using ((select public.is_admin())) with check ((select public.is_admin()));
