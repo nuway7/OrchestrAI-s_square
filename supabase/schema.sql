@@ -24,6 +24,10 @@ create table if not exists public.works (
   created_at timestamptz not null default now()
 );
 
+-- 작업물 이미지 (Storage 'works' 버킷 안 경로: <올린 사람 id>/<파일 id>.<확장자>)
+alter table public.works add column if not exists image_path text
+  check (image_path is null or image_path ~ '^[0-9a-f-]{36}/[0-9a-f-]{36}\.(webp|jpg|png)$');
+
 create table if not exists public.opinions (
   id uuid primary key default gen_random_uuid(),
   author_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
@@ -64,7 +68,7 @@ grant insert (id, name, look, room) on public.profiles to authenticated;
 grant update (name, look, room, updated_at) on public.profiles to authenticated;
 
 grant select, delete on public.works to authenticated;
-grant insert (title, description, link) on public.works to authenticated;
+grant insert (title, description, link, image_path) on public.works to authenticated;
 
 grant select, delete on public.opinions to authenticated;
 grant insert (body) on public.opinions to authenticated;
@@ -90,7 +94,10 @@ drop policy if exists "works: 동아리원은 모두 볼 수 있음" on public.w
 drop policy if exists "works: 내 이름으로만 올리기" on public.works;
 drop policy if exists "works: 내 글 또는 관리자만 지우기" on public.works;
 create policy "works: 동아리원은 모두 볼 수 있음" on public.works for select to authenticated using (true);
-create policy "works: 내 이름으로만 올리기" on public.works for insert to authenticated with check (author_id = (select auth.uid()));
+create policy "works: 내 이름으로만 올리기" on public.works for insert to authenticated with check (
+  author_id = (select auth.uid())
+  and (image_path is null or split_part(image_path, '/', 1) = (select auth.uid())::text)
+);
 create policy "works: 내 글 또는 관리자만 지우기" on public.works for delete to authenticated
   using (author_id = (select auth.uid()) or (select public.is_admin()));
 
@@ -252,3 +259,82 @@ drop policy if exists "settings: 관리자만 바꾸기" on public.club_settings
 create policy "settings: 동아리원은 모두 볼 수 있음" on public.club_settings for select to authenticated using (true);
 create policy "settings: 관리자만 바꾸기" on public.club_settings for update to authenticated
   using ((select public.is_admin())) with check ((select public.is_admin()));
+
+-- =====================================================================
+-- 3차: 미니룸 꾸미기, 작업물 이미지(Storage), 별 줍기 미니게임
+-- =====================================================================
+
+-- ---------- 미니룸 꾸미기 (방 하나에 한 줄) ----------
+create table if not exists public.room_decor (
+  room smallint primary key check (room between 1 and 5),
+  owner_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  items jsonb not null default '[]'::jsonb check (jsonb_typeof(items) = 'array' and jsonb_array_length(items) <= 24),
+  rug text not null default '' check (rug ~ '^(#[0-9a-f]{6})?$'),
+  updated_at timestamptz not null default now()
+);
+
+-- 지금 내 방 번호 (RLS에서 씀)
+create or replace function public.my_room()
+returns smallint
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select room from public.profiles where id = auth.uid();
+$$;
+revoke all on function public.my_room() from public, anon;
+grant execute on function public.my_room() to authenticated;
+
+-- ---------- 별 줍기: 30초마다 별 하나, 먼저 주운 한 명만 기록 ----------
+create table if not exists public.star_catches (
+  slot bigint primary key,
+  user_id uuid not null default auth.uid() references public.profiles (id) on delete cascade,
+  caught_at timestamptz not null default now()
+);
+create index if not exists star_catches_time_idx on public.star_catches (caught_at desc);
+
+revoke all on public.room_decor, public.star_catches from anon, authenticated;
+grant select on public.room_decor to authenticated;
+grant insert (room, items, rug) on public.room_decor to authenticated;
+grant update (owner_id, items, rug, updated_at) on public.room_decor to authenticated;
+grant select on public.star_catches to authenticated;
+grant insert (slot) on public.star_catches to authenticated;
+
+alter table public.room_decor enable row level security;
+alter table public.star_catches enable row level security;
+
+drop policy if exists "decor: 동아리원은 모두 볼 수 있음" on public.room_decor;
+drop policy if exists "decor: 내 방만 꾸미기" on public.room_decor;
+drop policy if exists "decor: 내 방만 고치기" on public.room_decor;
+create policy "decor: 동아리원은 모두 볼 수 있음" on public.room_decor for select to authenticated using (true);
+create policy "decor: 내 방만 꾸미기" on public.room_decor for insert to authenticated
+  with check (owner_id = (select auth.uid()) and room = (select public.my_room()));
+create policy "decor: 내 방만 고치기" on public.room_decor for update to authenticated
+  using (room = (select public.my_room()))
+  with check (owner_id = (select auth.uid()) and room = (select public.my_room()));
+
+drop policy if exists "stars: 동아리원은 모두 볼 수 있음" on public.star_catches;
+drop policy if exists "stars: 지금 떠 있는 별만 줍기" on public.star_catches;
+create policy "stars: 동아리원은 모두 볼 수 있음" on public.star_catches for select to authenticated using (true);
+-- 미래나 지난 별을 미리/나중에 줍지 못하게 지금 시각 ±1칸(30초)만 허용
+create policy "stars: 지금 떠 있는 별만 줍기" on public.star_catches for insert to authenticated with check (
+  user_id = (select auth.uid())
+  and slot between floor(extract(epoch from now()) / 30)::bigint - 1 and floor(extract(epoch from now()) / 30)::bigint + 1
+);
+
+-- ---------- 작업물 이미지 저장소 (비공개 버킷) ----------
+-- 로그인한 동아리원만 볼 수 있고, 각자 자기 폴더(<내 id>/)에만 올리고 지울 수 있다. 한 장 최대 2MB.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('works', 'works', false, 2097152, array['image/webp', 'image/jpeg', 'image/png'])
+on conflict (id) do update set public = false, file_size_limit = 2097152, allowed_mime_types = array['image/webp', 'image/jpeg', 'image/png'];
+
+drop policy if exists "plaza works: 동아리원은 볼 수 있음" on storage.objects;
+drop policy if exists "plaza works: 내 폴더에만 올리기" on storage.objects;
+drop policy if exists "plaza works: 내 폴더만 지우기" on storage.objects;
+create policy "plaza works: 동아리원은 볼 수 있음" on storage.objects for select to authenticated
+  using (bucket_id = 'works');
+create policy "plaza works: 내 폴더에만 올리기" on storage.objects for insert to authenticated
+  with check (bucket_id = 'works' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "plaza works: 내 폴더만 지우기" on storage.objects for delete to authenticated
+  using (bucket_id = 'works' and ((storage.foldername(name))[1] = (select auth.uid())::text or (select public.is_admin())));

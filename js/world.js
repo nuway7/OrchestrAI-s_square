@@ -269,7 +269,6 @@ export function buildWorld() {
   const SCREEN_TINTS = ['#4fb4d8', '#f28ca8', '#58b98a', '#e8b83e', '#9c86e8'];
   for (const room of rooms) {
     addProp(deskSprite(SCREEN_TINTS[room.no - 1]), room.x + 24, room.y + TILE + 2);
-    addProp(plantSprite(), room.x + 40, room.y + 4 * TILE - 1);
   }
 
   // 벤치와 가로등
@@ -418,5 +417,16 @@ export function buildWorld() {
     return solid[at(c, r)] === 1;
   };
 
-  return { groundCanvas, props, zones, labels, rooms, ddayPanel, isSolid, spawn: { x: CX * TILE, y: 22 * TILE } };
+  // 별 줍기 자리: 바깥(잔디·길)이면서 상하좌우가 다 열려 있는 칸
+  const starSpots = [];
+  for (let r = 2; r < ROWS - 2; r++) {
+    for (let c = 2; c < COLS - 2; c++) {
+      const t = ground[at(c, r)];
+      if (t !== GRASS && t !== PATH) continue;
+      if (solid[at(c, r)] || solid[at(c - 1, r)] || solid[at(c + 1, r)] || solid[at(c, r - 1)] || solid[at(c, r + 1)]) continue;
+      starSpots.push({ x: c * TILE + 8, y: r * TILE + 12 });
+    }
+  }
+
+  return { groundCanvas, props, zones, labels, rooms, ddayPanel, starSpots, isSolid, spawn: { x: CX * TILE, y: 22 * TILE } };
 }

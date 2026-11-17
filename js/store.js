@@ -7,6 +7,9 @@
 // 잔디: visits(sinceDay) → [{ userId, day }], markVisit()
 // 설정: settings() → { dday: { title, date }, links: { site, github } }, saveSetting(key, value)
 // 사람: members() → [{ id, name, look, room }]
+// 미니룸: decor() → { [room]: { items, rug } }, saveDecor(room, { items, rug })
+// 이미지: addWork({ ..., image: { blob, ext } }), imageUrls(works) → { [workId]: url }
+// 별: starCaught(slot) → userId | null, catchStar(slot) → true(내가 주움) | false(이미 누가), starRanking(sinceIso) → [{ userId, count }]
 // remove의 kind: works, opinions, agendas, agenda_comments, events
 
 const now = () => new Date().toISOString();
@@ -34,7 +37,13 @@ function save(kind, v) {
 }
 const newest = (a, b) => (a.date < b.date ? 1 : -1);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
-export const kstDay = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
+const blobToDataUrl = (blob) => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(r.result);
+  r.onerror = () => rej(new Error('그림을 읽지 못했어요.'));
+  r.readAsDataURL(blob);
+});
+export const kstDay =(d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }).format(d);
 
 export function createLocalStore(me) {
   const mine = () => ({ id: uid(), author: me.name, authorId: me.uid, date: now() });
@@ -42,7 +51,17 @@ export function createLocalStore(me) {
 
   return {
     async list(kind) { return load(kind).sort(newest); },
-    async addWork({ title, desc, link }) { push('works', { ...mine(), title, desc, link }); },
+    async addWork({ title, desc, link, image }) {
+      // 연습 모드는 그림을 작게 줄인 data URL로 이 브라우저에 저장 (용량 한도가 작아서)
+      const dataUrl = image ? await blobToDataUrl(image.small || image.blob) : '';
+      const item = { ...mine(), title, desc, link, image: dataUrl };
+      const list = load('works');
+      list.push(item);
+      try { localStorage.setItem(KEY('works'), JSON.stringify(list)); } catch { throw new Error('이 브라우저 저장 공간이 꽉 찼어요. 연습 모드에서는 그림을 몇 장만 올릴 수 있어요.'); }
+    },
+    async imageUrls(works) {
+      return Object.fromEntries(works.filter((w) => w.image).map((w) => [w.id, w.image]));
+    },
     async addOpinion({ text }) { push('opinions', { ...mine(), text, likes: [] }); },
     async toggleLike(id, liked) {
       const list = load('opinions');
@@ -95,6 +114,23 @@ export function createLocalStore(me) {
 
     async members() {
       return [{ id: me.uid, name: me.name, look: me.look, room: me.room ?? null }];
+    },
+
+    async decor() { return load('decor', {}); },
+    async saveDecor(room, value) { const d = load('decor', {}); d[room] = value; save('decor', d); },
+
+    async starCaught(slot) { return load('stars').find((s) => s.slot === slot)?.userId || null; },
+    async catchStar(slot) {
+      const list = load('stars');
+      if (list.some((s) => s.slot === slot)) return false;
+      list.push({ slot, userId: me.uid, at: now() });
+      save('stars', list.slice(-2000));
+      return true;
+    },
+    async starRanking(sinceIso) {
+      const counts = {};
+      for (const s of load('stars')) if (s.at >= sinceIso) counts[s.userId] = (counts[s.userId] || 0) + 1;
+      return Object.entries(counts).map(([userId, count]) => ({ userId, count })).sort((a, b) => b.count - a.count);
     },
 
     onChange(fn) {

@@ -7,6 +7,7 @@ import { createLocalStore, kstDay } from './store.js';
 import { createSupabaseStore } from './store-supabase.js';
 import { setupUI, openModal, closeModal, isModalOpen, refreshModal, ddayParts } from './ui.js';
 import { drawPixelText, pixelTextWidth, drawEmote, EMOTES } from './pixelfont.js';
+import { DECOR_ITEMS, DECOR_GRID, decorSprite, cleanDecor, starSprite } from './decor.js';
 
 const FONT = '"Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif';
 const SPEED = 72;          // 월드 px / 초 (보내는 쪽과 받는 쪽이 같은 값을 써야 예측이 맞는다)
@@ -172,9 +173,10 @@ $('change-password').addEventListener('click', async (e) => {
   const msg = $('pw-msg');
   msg.hidden = false;
   if (pw.length < 8) { msg.textContent = '8자 이상으로 정해 주세요.'; return; }
-  e.currentTarget.disabled = true;
+  const btn = e.currentTarget; // await 뒤에는 e.currentTarget이 비므로 미리 잡아 둔다
+  btn.disabled = true;
   const { error } = await supabase.auth.updateUser({ password: pw });
-  e.currentTarget.disabled = false;
+  btn.disabled = false;
   $('new-password').value = '';
   msg.textContent = error ? `바꾸지 못했어요: ${error.message}` : '비밀번호를 바꿨어요.';
 });
@@ -236,6 +238,11 @@ function enter() {
       if (p) { addLog(null, `${p.name} 님이 나갔어요`); peers.delete(id); updateWho(); }
     },
     posted(kind) { onDataChanged(kind); },
+    star({ id, name, slot }) {
+      if (slot === star.slot) star.caughtBy = id;
+      addLog(null, `⭐ ${name} 님이 별을 주웠어요!`);
+      refreshModal('stars');
+    },
     emote({ id, emote }) {
       const p = peers.get(id);
       if (p) p.emote = { n: emote, until: performance.now() + EMOTE_MS };
@@ -254,10 +261,14 @@ function enter() {
     members: () => members,
     settings: async () => settings || reloadSettings(),
     reloadSettings,
+    decor: () => decor,
+    reloadDecor,
     visitProgress: () => ({ minutes: Math.min(10, Math.floor(visit.sec / 60)), done: visit.done }),
   });
   reloadMembers();
   reloadSettings();
+  reloadDecor();
+  loadMyStars();
   startVisitTimer();
 
   net.hello(stateOf(me));
@@ -283,7 +294,62 @@ async function reloadSettings() {
 function onDataChanged(kind) {
   if (kind === 'profiles') reloadMembers().then(() => refreshModal(kind));
   else if (kind === 'settings') reloadSettings().then(() => refreshModal(kind));
+  else if (kind === 'decor') reloadDecor();
   else refreshModal(kind);
+}
+
+// ---------- 미니룸 꾸미기: 방 번호 → { items, rug } (믿을 수 있게 정리한 값) ----------
+let decor = {};
+async function reloadDecor() {
+  try {
+    const raw = await store.decor();
+    decor = Object.fromEntries(Object.entries(raw).map(([room, d]) => [room, cleanDecor(d)]));
+  } catch { /* 다음 신호 때 다시 */ }
+}
+
+// ---------- 별 줍기: 30초마다 모두에게 같은 자리에 별 하나 ----------
+const STAR_SLOT_MS = 30000;
+const star = { slot: -1, x: 0, y: 0, caughtBy: null, pending: false };
+let myStarsToday = 0;
+
+function starPos(slot) {
+  let h = (slot ^ 0x9e3779b9) | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  h ^= h >>> 16;
+  return world.starSpots[(h >>> 0) % world.starSpots.length];
+}
+function updateStarButton() { $('stars-btn').textContent = `⭐ 오늘 ${myStarsToday}`; }
+async function loadMyStars() {
+  try {
+    const rows = await store.starRanking(`${kstDay()}T00:00:00+09:00`);
+    myStarsToday = rows.find((r) => r.userId === me.uid)?.count || 0;
+  } catch { /* 0으로 둔다 */ }
+  updateStarButton();
+}
+function updateStar() {
+  const slot = Math.floor(Date.now() / STAR_SLOT_MS);
+  if (slot !== star.slot) {
+    Object.assign(star, { slot, ...starPos(slot), caughtBy: null, pending: false });
+    store.starCaught(slot).then((who) => { if (who && star.slot === slot) star.caughtBy = who; }).catch(() => {});
+  }
+  if (star.caughtBy || star.pending || Math.hypot(me.x - star.x, me.y - star.y) > 10) return;
+  star.pending = true;
+  const slotNow = star.slot;
+  store.catchStar(slotNow).then((ok) => {
+    if (star.slot !== slotNow) return;
+    if (ok) {
+      star.caughtBy = me.uid;
+      myStarsToday++;
+      updateStarButton();
+      net.star(slotNow);
+      addLog(null, '⭐ 별을 주웠어요!');
+      me.emote = { n: 1, until: performance.now() + EMOTE_MS };
+      refreshModal('stars');
+    } else {
+      star.caughtBy = 'someone';
+    }
+  }).catch(() => { star.pending = false; });
 }
 
 // ---------- 방문 잔디: 하루에 광장에 10분 이상 ----------
@@ -417,6 +483,7 @@ $('chat').addEventListener('submit', (e) => {
 
 $('who').addEventListener('click', () => { $('who-list').hidden = !$('who-list').hidden; });
 $('help').addEventListener('click', () => openModal('sign'));
+$('stars-btn').addEventListener('click', () => openModal('stars'));
 $('prompt').addEventListener('click', () => openZone());
 
 function openZone() {
@@ -493,6 +560,8 @@ function update(dt, now) {
     if (Math.hypot(p.x - p.dx, p.y - p.dy) > 64) { p.dx = p.x; p.dy = p.y; } // 너무 멀면 순간이동
     p.anim = p.moving || Math.hypot(p.x - p.dx, p.y - p.dy) > 0.5 ? p.anim + dt : 0;
   }
+
+  updateStar();
 
   const z = world.zones.find((zz) => me.x >= zz.x && me.x <= zz.x + zz.w && me.y >= zz.y && me.y <= zz.y + zz.h) || null;
   if (z !== zone) {
@@ -575,9 +644,28 @@ function render(now) {
     ctx.fillRect(sx(target.x - 1), sy(target.y - r / 2 - 1), zoom * 2, Math.round(r * zoom));
   }
 
+  // 꾸민 방의 러그 색 (구운 바닥 러그 위에 덮어 그림)
+  const decorProps = [];
+  for (const room of world.rooms) {
+    const d = decor[room.no];
+    if (!d) continue;
+    if (d.rug) { ctx.fillStyle = d.rug; ctx.fillRect(sx(room.x + 7), sy(room.y + 23), 34 * zoom, 28 * zoom); }
+    for (const it of d.items) {
+      const img = decorSprite(it.t);
+      const x = room.x + it.x * DECOR_GRID.cell, y = room.y + TILE + it.y * DECOR_GRID.cell;
+      decorProps.push({ img, x, y, baseY: y + DECOR_ITEMS[it.t].h * DECOR_GRID.cell });
+    }
+  }
+
   const chars = me ? [me, ...peers.values()] : [];
   const items = [
-    ...world.props.map((p) => ({ y: p.baseY, draw: () => ctx.drawImage(p.img, sx(p.x), sy(p.y), p.img.width * zoom, p.img.height * zoom) })),
+    ...[...world.props, ...decorProps].map((p) => ({ y: p.baseY, draw: () => ctx.drawImage(p.img, sx(p.x), sy(p.y), p.img.width * zoom, p.img.height * zoom) })),
+    ...(me && !star.caughtBy ? [{ y: star.y, draw: () => {
+      const bob = Math.round(Math.sin(now / 250) * 1.5);
+      ctx.fillStyle = 'rgba(40,50,30,0.2)';
+      ctx.fillRect(sx(star.x - 3), sy(star.y - 1), 6 * zoom, zoom);
+      ctx.drawImage(starSprite(Math.floor(now / 300) % 2), sx(star.x - 4), sy(star.y - 12 + bob), 9 * zoom, 9 * zoom);
+    } }] : []),
     ...chars.map((c) => {
       const { x, y } = posOf(c);
       return {

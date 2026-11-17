@@ -181,3 +181,31 @@ button:disabled { opacity: 0.55; cursor: progress; }
 .dday-big { font-size: 44px; font-weight: 900; letter-spacing: 2px; font-variant-numeric: tabular-nums; }
 .dday-clock { color: #9fe0ff; font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .dday-card .meta { color: #d8cfc2; margin-top: 8px; }
+
+/* ---------- 3차: 작업 이미지, 미니룸 꾸미기, 별 줍기 ---------- */
+.file-field { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+.file-field input { font-weight: 500; font-size: 13px; }
+.upload-preview { max-width: 160px; max-height: 120px; border-radius: 8px; border: 2px solid var(--line); object-fit: cover; }
+.card.framed { padding-top: 12px; }
+.frame { display: block; width: 100%; padding: 6px; margin: 0 0 8px; border: 4px solid #9a6a45; border-radius: 6px; background: #f4f1ea; box-shadow: inset 0 0 0 2px #c98b4f; cursor: zoom-in; }
+.frame img { display: block; width: 100%; aspect-ratio: 4 / 3; object-fit: cover; image-rendering: auto; }
+.lightbox { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; align-content: center; gap: 8px; background: rgba(20, 15, 12, 0.82); padding: 16px; cursor: zoom-out; }
+.lightbox img { max-width: min(96vw, 1280px); max-height: 82vh; border: 6px solid #f4f1ea; border-radius: 6px; }
+.lightbox p { color: #f4e9da; font-size: 13px; margin: 0; }
+
+.decor-wrap { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.decor-canvas { width: 288px; max-width: 100%; aspect-ratio: 1; image-rendering: pixelated; border: 3px solid var(--ink); border-radius: 10px; cursor: pointer; flex: none; }
+.decor-side { flex: 1; min-width: 220px; display: flex; flex-direction: column; gap: 10px; }
+.decor-palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
+.decor-pick { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px; border: 2px solid var(--line); border-radius: 10px; background: var(--paper-2); font-size: 12px; cursor: pointer; }
+.decor-pick.on { border-color: var(--ink); background: #fff3c4; color: #4a342c; font-weight: 800; }
+.decor-icon { height: 32px; width: auto; image-rendering: pixelated; }
+.rug-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rug-row .meta { margin: 0 4px 0 0; }
+
+.rank-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.rank-grid h3 { margin: 0 0 6px; font-size: 15px; }
+.rank { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rank li { display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 6px; background: var(--paper-2); border-radius: 10px; padding: 6px 10px; }
+.rank li.me { outline: 2px solid var(--accent); }
+.medal { text-align: center; font-weight: 800; }

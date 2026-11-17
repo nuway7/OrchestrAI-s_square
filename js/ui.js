@@ -1,6 +1,7 @@
 // 창(모달)들: 전시관, 의견 게시판, 안내, 작업실 노트북, 일정 게시판, D-day.
 // 사용자 글은 모두 textContent로만 넣는다(HTML로 해석하지 않음).
 import { kstDay } from './store.js';
+import { DECOR_ITEMS, DECOR_GRID, DECOR_MAX, RUG_COLORS, decorSprite, occupancy, fits, cleanDecor } from './decor.js';
 
 const modal = document.getElementById('modal');
 const body = document.getElementById('modal-body');
@@ -80,12 +81,61 @@ function deleteButton(kind, item, after) {
   }, '지우기');
 }
 
+// ---------- 그림 준비: 크기를 줄여 webp(안 되면 jpg)로 ----------
+const MAX_UPLOAD = 2 * 1024 * 1024;
+async function encode(bmp, max, quality) {
+  const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(bmp.width * scale));
+  cv.height = Math.max(1, Math.round(bmp.height * scale));
+  const g = cv.getContext('2d');
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, cv.width, cv.height);
+  g.drawImage(bmp, 0, 0, cv.width, cv.height);
+  let blob = await new Promise((r) => cv.toBlob(r, 'image/webp', quality));
+  if (!blob || blob.type !== 'image/webp') blob = await new Promise((r) => cv.toBlob(r, 'image/jpeg', quality));
+  if (!blob) throw new Error('그림을 바꾸지 못했어요.');
+  return blob;
+}
+async function prepareImage(file) {
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) throw new Error('PNG, JPG, WEBP, GIF 그림만 올릴 수 있어요.');
+  if (file.size > 20 * 1024 * 1024) throw new Error('그림이 너무 커요. 20MB 이하로 골라 주세요.');
+  const bmp = await createImageBitmap(file);
+  let blob = await encode(bmp, 1280, 0.85);
+  if (blob.size > MAX_UPLOAD) blob = await encode(bmp, 900, 0.72);
+  if (blob.size > MAX_UPLOAD) throw new Error('그림을 2MB 이하로 줄이지 못했어요. 더 작은 그림을 골라 주세요.');
+  const small = ctx.mode === 'local' ? await encode(bmp, 480, 0.7) : null;
+  bmp.close?.();
+  return { blob, small, type: blob.type, ext: blob.type === 'image/webp' ? 'webp' : 'jpg' };
+}
+
+function openLightbox(src, alt) {
+  const box = el('div', { class: 'lightbox', role: 'dialog', 'aria-label': alt, onclick: () => box.remove() },
+    el('img', { src, alt }), el('p', {}, '아무 데나 누르면 닫혀요'));
+  const onKey = (e) => { if (e.key === 'Escape') { e.stopImmediatePropagation(); box.remove(); } };
+  const obs = new MutationObserver(() => { if (!box.isConnected) { window.removeEventListener('keydown', onKey, true); obs.disconnect(); } });
+  window.addEventListener('keydown', onKey, true);
+  document.body.append(box);
+  obs.observe(document.body, { childList: true });
+}
+
 // ---------- 전시관 ----------
 async function renderGallery() {
+  const preview = el('img', { class: 'upload-preview', alt: '', hidden: true });
+  let picked = null;
+  const fileInput = el('input', { name: 'image', type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif' });
+  fileInput.addEventListener('change', () => {
+    picked = fileInput.files?.[0] || null;
+    if (preview.src) URL.revokeObjectURL(preview.src);
+    preview.hidden = !picked;
+    if (picked) preview.src = URL.createObjectURL(picked);
+  });
   const form = el('form', { class: 'form', hidden: true },
     el('input', { name: 'title', maxlength: '40', placeholder: '작업 제목', required: true }),
     el('textarea', { name: 'desc', maxlength: '400', rows: '3', placeholder: '어떤 작업인지 짧게 소개해 주세요' }),
     el('input', { name: 'link', maxlength: '300', placeholder: '링크 (선택, https://...)' }),
+    el('label', { class: 'file-field' }, el('span', {}, '🖼️ 작업 이미지 (선택, 자동으로 줄여서 올려요)'), fileInput),
+    preview,
     el('div', { class: 'row' }, el('button', { type: 'submit', class: 'primary' }, '올리기')),
   );
   form.addEventListener('submit', async (e) => {
@@ -96,15 +146,24 @@ async function renderGallery() {
     const rawLink = String(f.get('link') || '').trim();
     const link = rawLink ? safeUrl(rawLink) : '';
     if (rawLink && !link) { showError('링크는 https:// 로 시작하는 주소만 넣을 수 있어요.'); return; }
-    if (await act(submitBtn(form), () => ctx.store.addWork({ title, desc: String(f.get('desc') || '').trim(), link }))) { ctx.onPosted('works'); render(); }
+    const ok = await act(submitBtn(form), async () => {
+      const image = picked ? await prepareImage(picked) : null;
+      await ctx.store.addWork({ title, desc: String(f.get('desc') || '').trim(), link, image });
+    });
+    if (ok) { ctx.onPosted('works'); render(); }
   });
   const toggle = el('button', { class: 'primary', type: 'button', onclick: () => { form.hidden = !form.hidden; if (!form.hidden) form.querySelector('input').focus(); } }, '+ 작업 올리기');
 
   const works = await ctx.store.list('works');
+  let urls = {};
+  try { urls = await ctx.store.imageUrls(works); } catch { /* 그림 없이 보여 준다 */ }
   const list = el('div', { class: 'cards' });
   for (const w of works) {
     const link = w.link && safeUrl(w.link);
-    list.append(el('article', { class: 'card' },
+    const src = urls[w.id];
+    list.append(el('article', { class: `card${src ? ' framed' : ''}` },
+      src ? el('button', { type: 'button', class: 'frame', 'aria-label': `${w.title} 크게 보기`, onclick: () => openLightbox(src, w.title) },
+        el('img', { src, alt: w.title, loading: 'lazy' })) : null,
       el('h3', {}, w.title),
       el('p', { class: 'meta' }, `${w.author} · ${fmtDate(w.date)}`),
       w.desc ? el('p', {}, w.desc) : null,
@@ -161,6 +220,8 @@ async function renderSign() {
     ['감정 표현', '숫자 1~5 키, 또는 채팅창 옆 😊 버튼'],
     ['들어가기', '건물·게시판·노트북 앞에서 E 키 또는 화면 아래 버튼'],
     ['방문 잔디', '하루에 광장에 10분 이상 있으면 그날 잔디가 심어져요'],
+    ['별 줍기', '30초마다 광장 어딘가에 별이 떨어져요. 먼저 닿으면 내 것! (위쪽 ⭐ 버튼에서 순위)'],
+    ['방 꾸미기', '내 방 노트북의 "방 꾸미기" 탭에서 가구를 놓아요'],
     ['닫기', 'Esc'],
   ];
   const note = ctx.mode === 'supabase'
@@ -178,12 +239,15 @@ async function renderSign() {
 async function renderLaptop(room) {
   const owner = ctx.members().find((m) => m.room === room);
   const title = owner ? `${owner.name}의 노트북` : `${room}번 방 노트북`;
-  const tabs = [['agendas', '안건 의견'], ['grass', '방문 잔디'], ['dure', '두레 바로가기']];
+  const mine = ctx.me.room === room;
+  const tabs = [['agendas', '안건 의견'], ['grass', '방문 잔디'], ['dure', '두레 바로가기'], ...(mine ? [['decor', '🛋️ 방 꾸미기']] : [])];
+  if (!tabs.some(([id]) => id === laptop.tab)) laptop.tab = 'agendas';
   const tabBar = el('div', { class: 'tabs', role: 'tablist' }, ...tabs.map(([id, label]) => el('button', {
     type: 'button', role: 'tab', class: `tab${laptop.tab === id ? ' on' : ''}`, 'aria-selected': String(laptop.tab === id),
     onclick: () => { laptop.tab = id; laptop.agendaId = null; render(); },
   }, label)));
-  const content = laptop.tab === 'grass' ? await laptopGrass() : laptop.tab === 'dure' ? await laptopDure() : await laptopAgendas();
+  const content = laptop.tab === 'grass' ? await laptopGrass() : laptop.tab === 'dure' ? await laptopDure()
+    : laptop.tab === 'decor' ? laptopDecor(room) : await laptopAgendas();
   return [el('div', { class: 'head laptop-head' }, el('span', { class: 'screen-dot' }), el('h2', {}, title)), tabBar, errorBox(), ...content];
 }
 
@@ -314,6 +378,105 @@ async function laptopDure() {
   return parts;
 }
 
+// ---------- 방 꾸미기 (노트북, 내 방일 때만) ----------
+let draft = null; // { room, items, rug, tool }
+const PREVIEW_SCALE = 6;
+
+function laptopDecor(room) {
+  if (!draft || draft.room !== room) {
+    const saved = cleanDecor(ctx.decor()[room]);
+    draft = { room, items: saved.items, rug: saved.rug, tool: 'plant' };
+  }
+  const size = DECOR_GRID.cols * DECOR_GRID.cell;
+  const cv = el('canvas', { class: 'decor-canvas', width: String(size * PREVIEW_SCALE), height: String(size * PREVIEW_SCALE), role: 'img', 'aria-label': '내 방 미리보기' });
+  const count = el('span', { class: 'meta' });
+  const g = cv.getContext('2d');
+
+  const draw = () => {
+    g.imageSmoothingEnabled = false;
+    g.setTransform(PREVIEW_SCALE, 0, 0, PREVIEW_SCALE, 0, 0);
+    // 나무 바닥
+    for (let y = 0; y < size; y++) { g.fillStyle = y % 4 === 0 ? '#cfa874' : '#e3c08f'; g.fillRect(0, y, size, 1); }
+    // 러그 (월드와 같은 자리: 방 안쪽 x 7~41, 바닥 기준 y 7~35)
+    g.fillStyle = '#8a6a55'; g.fillRect(6, 6, 36, 30);
+    g.fillStyle = draft.rug || ['#cfe3ef', '#f6d6de', '#d6ecd9', '#f4e5bf', '#e3dcf3'][room - 1]; g.fillRect(7, 7, 34, 28);
+    // 칸 선
+    g.fillStyle = 'rgba(74,52,44,0.12)';
+    for (let i = 1; i < DECOR_GRID.cols; i++) { g.fillRect(i * DECOR_GRID.cell, 0, 0.25, size); g.fillRect(0, i * DECOR_GRID.cell, size, 0.25); }
+    for (const it of [...draft.items].sort((a, b) => (a.y + DECOR_ITEMS[a.t].h) - (b.y + DECOR_ITEMS[b.t].h))) {
+      g.drawImage(decorSprite(it.t), it.x * DECOR_GRID.cell, it.y * DECOR_GRID.cell);
+    }
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    count.textContent = `가구 ${draft.items.length} / ${DECOR_MAX}`;
+  };
+
+  cv.addEventListener('click', (e) => {
+    const r = cv.getBoundingClientRect();
+    const x = Math.floor(((e.clientX - r.left) / r.width) * DECOR_GRID.cols);
+    const y = Math.floor(((e.clientY - r.top) / r.height) * DECOR_GRID.rows);
+    const hit = occupancy(draft.items).get(`${x},${y}`);
+    if (hit !== undefined) draft.items.splice(hit, 1); // 놓인 가구를 누르면 치운다
+    else if (draft.tool !== 'erase' && draft.items.length < DECOR_MAX) {
+      // 누른 칸이 가구의 왼쪽 위가 되도록, 넘치면 안쪽으로 당긴다
+      const d = DECOR_ITEMS[draft.tool];
+      const px = Math.min(x, DECOR_GRID.cols - d.w), py = Math.min(y, DECOR_GRID.rows - d.h);
+      if (fits(draft.items, draft.tool, px, py)) draft.items.push({ t: draft.tool, x: px, y: py });
+    }
+    draw();
+  });
+
+  const palette = el('div', { class: 'decor-palette' }, ...Object.entries(DECOR_ITEMS).map(([id, item]) => {
+    const icon = el('canvas', { width: String(item.w * 8), height: String(item.h * 8), class: 'decor-icon' });
+    icon.getContext('2d').drawImage(decorSprite(id), 0, 0);
+    return el('button', {
+      type: 'button', class: `decor-pick${draft.tool === id ? ' on' : ''}`, 'aria-pressed': String(draft.tool === id),
+      onclick: (e) => { draft.tool = id; palette.querySelectorAll('.decor-pick').forEach((b) => { b.classList.remove('on'); b.setAttribute('aria-pressed', 'false'); }); e.currentTarget.classList.add('on'); e.currentTarget.setAttribute('aria-pressed', 'true'); },
+    }, icon, el('span', {}, item.label));
+  }));
+  const rugs = el('div', { class: 'rug-row' }, el('span', { class: 'meta' }, '러그'), ...RUG_COLORS.map((c) => el('button', {
+    type: 'button', class: `swatch${draft.rug === c ? ' on' : ''}`, style: `background:${c}`, 'aria-label': '러그 색',
+    onclick: (e) => { draft.rug = draft.rug === c ? '' : c; rugs.querySelectorAll('.swatch').forEach((s) => s.classList.remove('on')); if (draft.rug) e.currentTarget.classList.add('on'); draw(); },
+  })));
+  const save = el('button', {
+    type: 'button', class: 'primary',
+    onclick: async (e) => {
+      const btn = e.currentTarget; // await 뒤에는 e.currentTarget이 비므로 미리 잡아 둔다
+      const value = { items: draft.items, rug: draft.rug };
+      if (await act(btn, () => ctx.store.saveDecor(room, value))) {
+        await ctx.reloadDecor();
+        ctx.onPosted('decor');
+        btn.textContent = '저장했어요 ✓';
+      }
+    },
+  }, '저장하고 광장에 반영');
+  const reset = el('button', { type: 'button', class: 'ghost', onclick: () => { draft.items = []; draw(); } }, '모두 치우기');
+  draw();
+  return [
+    el('p', { class: 'sub' }, '가구를 고르고 바닥을 누르면 놓여요. 놓인 가구를 다시 누르면 치워져요. 저장하면 모두에게 보여요.'),
+    el('div', { class: 'decor-wrap' }, cv, el('div', { class: 'decor-side' }, palette, rugs, el('div', { class: 'row between' }, count, el('span', { class: 'actions' }, reset, save)))),
+  ];
+}
+
+// ---------- 별 줍기 순위 ----------
+async function renderStars() {
+  const today = kstDay();
+  const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
+  const monday = addDays(today, -((dow + 6) % 7));
+  const [week, day] = await Promise.all([ctx.store.starRanking(`${monday}T00:00:00+09:00`), ctx.store.starRanking(`${today}T00:00:00+09:00`)]);
+  const table = (rows) => rows.length
+    ? el('ol', { class: 'rank' }, ...rows.slice(0, 10).map((r, i) => el('li', { class: r.userId === ctx.me.uid ? 'me' : '' },
+      el('span', { class: 'medal' }, ['🥇', '🥈', '🥉'][i] || `${i + 1}`), el('b', {}, memberName(r.userId)), el('span', {}, `⭐ ${r.count}`))))
+    : el('p', { class: 'empty' }, '아직 아무도 별을 줍지 않았어요.');
+  return [
+    el('div', { class: 'head' }, el('h2', {}, '⭐ 별 줍기')),
+    el('p', { class: 'sub' }, '광장 어딘가에 30초마다 별이 하나 떨어져요. 가장 먼저 걸어가서 닿은 사람이 주워요. 별은 모두에게 같은 자리에 보여요.'),
+    el('div', { class: 'rank-grid' },
+      el('section', {}, el('h3', {}, '이번 주'), table(week)),
+      el('section', {}, el('h3', {}, '오늘'), table(day)),
+    ),
+  ];
+}
+
 // ---------- 일정 게시판 ----------
 const RSVP = [['going', '참석'], ['maybe', '고민 중'], ['no', '불참']];
 
@@ -417,11 +580,11 @@ async function renderDday() {
 }
 
 // ---------- 창 열고 닫기 ----------
-const RENDER = { gallery: renderGallery, board: renderBoard, sign: renderSign, laptop: renderLaptop, schedule: renderSchedule, dday: renderDday };
-// 어떤 데이터가 바뀌면 어떤 창을 새로 그릴지
+const RENDER = { gallery: renderGallery, board: renderBoard, sign: renderSign, laptop: renderLaptop, schedule: renderSchedule, dday: renderDday, stars: renderStars };
+// 어떤 데이터가 바뀌면 어떤 창을 새로 그릴지 (방 꾸미는 중에는 덮어쓰지 않도록 decor는 넣지 않음)
 const SHOWS = {
   gallery: ['works'], board: ['opinions'], schedule: ['events', 'profiles'], dday: ['settings'],
-  laptop: ['agendas', 'agenda_comments', 'visits', 'settings', 'profiles'],
+  laptop: ['agendas', 'agenda_comments', 'visits', 'settings', 'profiles'], stars: ['stars', 'profiles'],
 };
 
 async function render() {
@@ -442,7 +605,7 @@ async function render() {
 }
 
 export function openModal(kind, arg) {
-  if (kind === 'laptop' && (current?.kind !== 'laptop' || current.arg !== arg)) { laptop.tab = 'agendas'; laptop.agendaId = null; }
+  if (kind === 'laptop' && (current?.kind !== 'laptop' || current.arg !== arg)) { laptop.tab = 'agendas'; laptop.agendaId = null; draft = null; }
   current = { kind, arg };
   modal.hidden = false;
   body.scrollTop = 0;

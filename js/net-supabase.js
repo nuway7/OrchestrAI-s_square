@@ -7,7 +7,7 @@
 // 받는 쪽은 같은 속도로 걸려 보면서(예측) 다음 메시지가 오면 살짝 보정한다.
 
 const MAX_CHAT = 120;
-export const POSTED_KINDS = ['works', 'opinions', 'agendas', 'agenda_comments', 'events', 'settings', 'profiles', 'visits'];
+export const POSTED_KINDS = ['works', 'opinions', 'agendas', 'agenda_comments', 'events', 'settings', 'profiles', 'visits', 'decor', 'stars'];
 const clean = (m) => {
   const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : undefined);
   const c = (v) => Math.max(-1, Math.min(1, n(v) || 0));
@@ -62,6 +62,11 @@ export function createSupabaseNet(supabase, me, on) {
   ch.on('broadcast', { event: 'posted' }, ({ payload }) => {
     if (payload && POSTED_KINDS.includes(payload.kind)) on.posted?.(payload.kind);
   });
+  ch.on('broadcast', { event: 'star' }, ({ payload }) => {
+    if (!payload || typeof payload.id !== 'string' || payload.id === me.id) return;
+    const slot = Number(payload.slot);
+    if (Number.isSafeInteger(slot)) on.star?.({ id: payload.id, name: clean(payload).name, slot });
+  });
   ch.on('broadcast', { event: 'emote' }, ({ payload }) => {
     if (!payload || typeof payload.id !== 'string' || payload.id === me.id) return;
     const n = Number(payload.emote);
@@ -93,6 +98,7 @@ export function createSupabaseNet(supabase, me, on) {
     chat(text) { send('chat', { text: String(text).slice(0, MAX_CHAT) }); },
     posted(kind) { send('posted', { kind }); },
     emote(n) { send('emote', { emote: n }); },
+    star(slot) { send('star', { slot }); },
     close() { supabase.removeChannel(ch); },
   };
 }
