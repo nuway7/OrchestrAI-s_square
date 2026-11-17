@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>동아리 광장</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game" tabindex="0" aria-label="동아리 광장 맵"></canvas>
+
+  <header id="hud" hidden>
+    <span class="hud-title">🌳 동아리 광장</span>
+    <button id="who" class="chip" type="button">접속 1명</button>
+    <span id="net-status" class="chip warn" hidden></span>
+    <button id="help" class="chip" type="button" aria-label="안내">?</button>
+    <button id="logout" class="chip" type="button" hidden>로그아웃</button>
+    <ul id="who-list" hidden></ul>
+  </header>
+
+  <div id="log" hidden aria-live="polite"></div>
+  <button id="prompt" type="button" hidden></button>
+  <form id="chat" hidden>
+    <input id="chat-input" maxlength="120" placeholder="Enter 눌러 말하기" autocomplete="off" aria-label="채팅">
+    <button type="submit">보내기</button>
+  </form>
+
+  <section id="entry">
+    <div id="entry-status" class="entry-card" role="status">
+      <h1>동아리 광장</h1>
+      <p id="entry-status-text" class="sub">불러오는 중…</p>
+    </div>
+
+    <form id="login-form" class="entry-card" hidden>
+      <h1>동아리 광장</h1>
+      <p class="sub">동아리원만 들어올 수 있어요. 운영진에게 받은 이메일과 비밀번호로 로그인해 주세요.</p>
+      <div class="entry-fields">
+        <label class="field">
+          <span>이메일</span>
+          <input id="login-email" type="email" autocomplete="username" required>
+        </label>
+        <label class="field">
+          <span>비밀번호</span>
+          <input id="login-password" type="password" autocomplete="current-password" required>
+        </label>
+        <p id="login-error" class="error" hidden></p>
+        <button type="submit" class="primary big">로그인</button>
+      </div>
+      <p class="footnote">계정이 없으면 동아리 운영진에게 요청해 주세요. 이 사이트에서는 직접 가입할 수 없어요.</p>
+    </form>
+
+    <form id="entry-form" class="entry-card" hidden>
+      <h1>동아리 광장</h1>
+      <p class="sub" id="entry-sub">동아리원들이 모여 작업을 보여 주고 이야기를 나누는 곳이에요.</p>
+      <div class="entry-body">
+        <canvas id="preview" width="96" height="128" aria-label="내 캐릭터 미리보기"></canvas>
+        <div class="entry-fields">
+          <label class="field">
+            <span>닉네임</span>
+            <input id="name" maxlength="12" placeholder="광장에서 보일 이름" autocomplete="off" required>
+          </label>
+          <div id="pickers"></div>
+          <button id="shuffle" type="button" class="ghost">🎲 랜덤으로 꾸미기</button>
+        </div>
+      </div>
+      <p id="entry-error" class="error" hidden></p>
+      <button type="submit" class="primary big">광장 입장하기</button>
+      <p id="local-note" class="footnote" hidden>연습 모드예요. 로그인 없이 이 브라우저 안에서만 돌아가요. Supabase를 연결하면(js/config.js) 이 앞에 로그인 화면이 생겨요.</p>
+      <div id="account" class="account" hidden>
+        <details>
+          <summary>비밀번호 바꾸기</summary>
+          <div class="pw-row">
+            <input id="new-password" type="password" minlength="8" autocomplete="new-password" placeholder="새 비밀번호 (8자 이상)">
+            <button id="change-password" type="button" class="ghost">바꾸기</button>
+          </div>
+          <p id="pw-msg" class="footnote" hidden></p>
+        </details>
+        <button id="logout-entry" type="button" class="link">로그아웃</button>
+      </div>
+    </form>
+  </section>
+
+  <div id="modal" hidden>
+    <div class="sheet" role="dialog" aria-modal="true">
+      <button class="close" type="button" aria-label="닫기">×</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+  <script>
+    // 스크립트가 아예 못 열리면(대개 config.js 따옴표 실수) "불러오는 중…"에서 멈추므로 안내를 띄운다
+    setTimeout(function () {
+      var s = document.getElementById('entry-status');
+      var t = document.getElementById('entry-status-text');
+      if (s && !s.hidden && t && t.textContent === '불러오는 중…') {
+        t.textContent = '사이트를 열지 못했어요. js/config.js에서 주소와 키가 각각 작은따옴표 한 쌍 안에 한 줄로 들어 있는지 확인하고 새로고침해 주세요.';
+      }
+    }, 8000);
+  </script>
+</body>
+</html>

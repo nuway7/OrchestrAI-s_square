@@ -1,0 +1,43 @@
+# 동아리 광장
+
+동아리원들이 도트 캐릭터로 모여 작업을 보여 주고 의견을 나누는 광장 사이트입니다.
+
+## 실행
+
+```bash
+py serve.py
+```
+
+브라우저에서 http://localhost:5188 을 엽니다. (맥/리눅스는 `python3 serve.py`)
+
+- **연습 모드** (기본): `js/config.js`가 비어 있으면 로그인 없이 열리고, 같은 브라우저의 탭끼리만 실시간으로 보입니다. 글은 이 브라우저에만 저장됩니다.
+- **Supabase 모드**: `js/config.js`를 채우면 로그인 화면이 생기고, 허용된 동아리원끼리 어디서든 실시간으로 만납니다. 설정 방법은 [SETUP-SUPABASE.md](SETUP-SUPABASE.md).
+
+## 조작
+
+| 동작 | 방법 |
+|---|---|
+| 이동 | 방향키 / WASD, 또는 원하는 곳 클릭·터치 |
+| 말하기 | Enter → 입력 → Enter (머리 위 말풍선) |
+| 들어가기 | 전시관·게시판·표지판 앞에서 E 또는 화면 아래 버튼 |
+| 닫기 | Esc |
+
+## 파일
+
+| 파일 | 내용 |
+|---|---|
+| `js/config.js` | Supabase 주소와 공개 키 (비우면 연습 모드) |
+| `js/backend.js` | 모드 고르기, Supabase 연결, secret 키 실수 방지 |
+| `js/main.js` | 로그인·입장 화면, 이동, 카메라, 그리기 |
+| `js/world.js` | 광장 맵, 나무·건물·벤치 도트 그림, 충돌 |
+| `js/sprites.js` | 캐릭터 도트(12x16칸)와 색 팔레트 |
+| `js/net.js` / `js/net-supabase.js` | 실시간 연결 (연습 / Supabase Realtime) |
+| `js/store.js` / `js/store-supabase.js` | 작업물·의견 저장 (연습 / Supabase DB) |
+| `js/ui.js` | 전시관, 의견 게시판, 안내 창 |
+| `supabase/schema.sql` | DB 표, RLS 보안 규칙, 실시간 채널 권한 |
+| `serve.py` | 로컬 확인용 서버 |
+
+## 공개 저장소에 올릴 때 지킬 것
+
+- `js/config.js`에는 **publishable(anon) 키만**. secret / service_role 키, DB 비밀번호는 절대 금지.
+- 회원 명단, 실제 글 내용, 실명이 보이는 스크린샷은 커밋하지 않기 (지워도 git 기록에 남아요).
